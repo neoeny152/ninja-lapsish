@@ -10,9 +10,11 @@
     built-in administrator (SID ending in -500) is disabled.
 
     A safety check is included to prevent disabling the built-in admin if it is found
-    to be running any active processes or scheduled tasks. If a task named 'OneDrive Reporting Task'
-    is found, the script will attempt to reassign it to the SYSTEM account before proceeding.
-    Any other conflicting task will halt the disable process.
+    to be running any active processes or scheduled tasks. If a task is found, the script
+    will attempt to reassign it to the SYSTEM account before proceeding.
+
+    A server OS safety check is included. By default, the script will not run on servers
+    unless explicitly enabled via the $AllowOnServers variable.
 
     It implements a password rotation policy, generating a new complex password and
     storing it in a secure NinjaOne custom field. A separate date custom field is used
@@ -27,9 +29,9 @@
 
 .NOTES
     Author: Gemini
-    Version: 2.0
+    Version: 2.1
     Created: 2025-08-01
-    Modified: 2025-08-01 - Added specific logic to only reassign the 'OneDrive Reporting Task'.
+    Modified: 2025-08-01 - Added server OS safety check.
 
     Requirements:
     - NinjaOne RMM Agent
@@ -39,6 +41,12 @@
 #>
 
 #region --- Configuration Variables ---
+
+# --- Server OS Safety Check ---
+# Set to $true to allow this script to run on Windows Server operating systems.
+# ProductType 1 = Workstation, 2 = Domain Controller, 3 = Server
+# By default, this is disabled to prevent accidental changes on critical servers.
+[bool]$AllowOnServers = $false
 
 # --- Account Settings ---
 # The desired username for the managed local administrator account.
@@ -117,6 +125,19 @@ try {
 }
 # --- End Logging Initialization ---
 
+# --- Pre-flight Safety Checks ---
+# Check if running on a server OS and if it's allowed
+try {
+    $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
+    if ($osInfo.ProductType -ne 1 -and -not $AllowOnServers) {
+        Write-Log -Level "WARN" -Message "This is a server OS (ProductType: $($osInfo.ProductType)) and the script is not configured to run on servers. Exiting."
+        exit 0
+    }
+} catch {
+    Write-Log -Level "ERROR" -Message "Could not determine Operating System type. Exiting to be safe. Error: $_"
+    exit 1
+}
+
 # --- Step 1: Disable the built-in Administrator account (SID ending in -500) ---
 try {
     $builtInAdmin = Get-CimInstance -Class Win32_UserAccount -Filter "SID LIKE '%-500'"
@@ -136,7 +157,6 @@ try {
                 if ($conflictingTasks) {
                     $unresolvedConflicts = $false
                     foreach ($task in $conflictingTasks) {
-                        # CORRECTED: Only attempt to fix the specific OneDrive task.
                         if ($task.TaskName -like "*OneDrive Reporting Task*") {
                             Write-Log -Level "WARN" -Message "Found known conflicting task: '$($task.TaskName)'. Attempting to reassign to 'SYSTEM' account."
                             try {
@@ -149,7 +169,6 @@ try {
                                 $reasons += "Scheduled Task: $($task.TaskName) (reassignment failed)"
                             }
                         } else {
-                            # If it's any other task, treat it as a critical conflict.
                             Write-Log -Level "WARN" -Message "Found UNKNOWN conflicting task: '$($task.TaskName)'. This task will not be changed automatically."
                             $unresolvedConflicts = $true
                             $reasons += "Scheduled Task: $($task.TaskName) (unknown)"
