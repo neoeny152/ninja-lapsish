@@ -10,6 +10,7 @@ The script is designed to be idempotent and safe for recurring execution as a sc
 * **Intelligent Safety Checks**: Before disabling the built-in admin, the script checks for any running processes or scheduled tasks using the account.
     * **Automated Remediation**: If it finds the common "OneDrive Reporting Task," it automatically reassigns it to the `SYSTEM` account to resolve the conflict.
     * **Failsafe**: For any other conflicting tasks or processes, it logs a detailed warning and skips the disable step to prevent outages.
+* **Server OS Safety Check**: By default, the script will not run on Windows Server operating systems. This can be overridden with a configuration variable, preventing accidental changes on critical servers.
 * **LAPS-Style Password Rotation**: Automatically rotates the managed admin's password only when its age exceeds a configurable threshold (e.g., 30 days).
 * **Secure Credential Storage**: Securely stores the managed admin password in a **Secure** NinjaOne custom field using the agent's built-in tools.
 * **Robust Logging**: Creates detailed, timestamped log files in `C:\admin` for easy troubleshooting, with automatic cleanup of old logs.
@@ -57,6 +58,10 @@ To make these fields easy to find on a device's page, you can group them in a de
 5.  Paste the entire contents of this script into the editor.
 6.  In the script editor, modify the variables in the `--- Configuration Variables ---` section to match your environment.
     ```powershell
+    # --- Server OS Safety Check ---
+    # Set to $true to allow this script to run on Windows Server operating systems.
+    [bool]$AllowOnServers = $false
+
     # --- Account Settings ---
     [string]$NewAdminName = 'corpadmin'
     [int]$PasswordLength = 16
@@ -97,7 +102,7 @@ To target only active workstations, it's best to create a dynamic group.
 
 The script executes in the following order:
 
-1.  **Logging**: Initializes a new log file in `C:\admin` and cleans up old logs.
+1.  **Pre-flight Checks**: The script first checks if it's running on a server OS. If it is, and `$AllowOnServers` is `$false`, it exits. It also initializes logging.
 2.  **Built-in Admin Check**: Finds the local account with the SID ending in `-500` and, if it's enabled and safe to do so, disables it.
 3.  **Managed Admin Check**: Ensures the managed admin account exists and is enabled, creating it if necessary.
 4.  **Password Age Check**: Reads the last rotation date from the custom field and determines if a password change is needed.
